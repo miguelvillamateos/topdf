@@ -1,2 +1,2 @@
 # topdf
-basic text to pdf experimment
+Basic text to pdf experimment in haskell
