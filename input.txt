@@ -1,2 +1,5 @@
-Hola esto es un ejemplo
-Esta es la segunda l�nea
+Esto es texto normal.
+\font[family=Courier, size=18]
+
+Este texto debería usar la nueva fuente.
+Y esto también.
