@@ -1,18 +1,18 @@
 %PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>/F2 << /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>/F3 << /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >> >> >> >> endobj
-4 0 obj << /Length 161 >> stream
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F2 << /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >> /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >> >> >> >> endobj
+4 0 obj << /Length 117 >> stream
 BT
 /F1 12 Tf
 12 TL
 72 800 Td
-(Esto es texto normal.) Tj T*
+(A ÁÉÍÓÚ áéíóú ñ Ñ) Tj T*
 /F2 18 Tf
 18 TL
+(A ÁÉÍÓÚ áéíóú ñ Ñ) Tj T*
 () Tj T*
-(Este texto deber¡a usar la nueva fuente.) Tj T*
-(Y esto tambi®n.) Tj T*
+() Tj T*
 ET
 endstream endobj
 xref
@@ -22,10 +22,10 @@ xref
 0000000009 00000 n 
 0000000058 00000 n 
 0000000115 00000 n 
-0000000487 00000 n 
-0000000520 00000 n 
-0000000682 00000 n 
+0000000489 00000 n 
+0000000522 00000 n 
+0000000640 00000 n 
 trailer << /Root 1 0 R /Size 5 >>
 startxref
-699
+657
 %%EOF

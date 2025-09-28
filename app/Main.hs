@@ -1,15 +1,20 @@
 
 import Lib (parseInput, generatePdf)
+import System.Environment (getArgs)
 
 main :: IO ()
 main = do
-    putStrLn "Parsing input.txt..."
-    parseResult <- parseInput "input.txt"
-    case parseResult of
-        Left err -> do
-            putStrLn "Error parsing file:"
-            print err
-        Right pdfValue -> do
-            putStrLn "Parse successful. Generating PDF..."
-            generatePdf pdfValue "output.pdf"
-            putStrLn "output.pdf generated."
+    args <- getArgs
+    case args of
+        [inputFile, outputFile] -> do
+            putStrLn $ "Parsing " ++ inputFile ++ "..."
+            parseResult <- parseInput inputFile
+            case parseResult of
+                Left err -> do
+                    putStrLn "Error parsing file:"
+                    print err
+                Right pdfValue -> do
+                    putStrLn "Parse successful. Generating PDF..."
+                    generatePdf pdfValue outputFile
+                    putStrLn $ outputFile ++ " generated."
+        _ -> putStrLn "Usage: topdf-exe <input-file> <output-file>"

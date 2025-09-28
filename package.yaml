@@ -17,14 +17,9 @@ extra-source-files:
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/githubuser/topdf#readme>
-
+description:    Please see the README on GitHub at <https://github.com/githubuser/topdf#readme>
 dependencies:
-- base >= 4.7 && < 5
-- text
-- bytestring
-- parsec
-- containers
+- base >= 4.7 && < 5      
 
 ghc-options:
 - -Wall
@@ -38,7 +33,12 @@ ghc-options:
 - -Wredundant-constraints
 
 library:
-  source-dirs: src
+  source-dirs: src  
+  dependencies:
+  - text
+  - bytestring
+  - parsec
+  - containers
 
 executables:
   topdf-exe:
@@ -49,6 +49,7 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
+    - text
     - topdf
 
 tests:

@@ -1,5 +1,4 @@
-Esto es texto normal.
+A ÁÉÍÓÚ áéíóú ñ Ñ
 \font[family=Courier, size=18]
+A ÁÉÍÓÚ áéíóú ñ Ñ
 
-Este texto debería usar la nueva fuente.
-Y esto también.
