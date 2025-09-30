@@ -83,6 +83,13 @@ buildStreamCommand :: [PDFType] -> String -> B.ByteString
 buildStreamCommand operands operator =
   B.intercalate (C8.pack " ") (map pdfTypeToByteString operands ++ [C8.pack operator])
 
+-- Construye la definición de un recurso de fuente para el diccionario de recursos del PDF.
+buildFontResource :: (String, String) -> (PDFName, PDFType)
+buildFontResource (fontName, fontId) =
+  ( PDFName (drop 1 fontId),
+    PDFDictType (PDFDictionary [(PDFName "Type", PDFNameType (PDFName "Font")), (PDFName "Subtype", PDFNameType (PDFName "Type1")), (PDFName "BaseFont", PDFNameType (PDFName fontName)), (PDFName "Encoding", PDFNameType (PDFName "WinAnsiEncoding"))])
+  )
+
 -- | Genera un fichero PDF a partir de un PDFValue.
 generatePdf :: PDFValue -> FilePath -> IO ()
 generatePdf (PDFDocument contents) outputPath = do
@@ -133,20 +140,20 @@ generatePdf (PDFDocument contents) outputPath = do
       contentObject = PDFIndirectObject 4 0 $ PDFStreamType (PDFStream (PDFDictionary []) contentStream)
 
       -- Convierte los objetos a ByteString para el fichero.
-      pdfObjects =
+      pdfFileBody =
         [ pdfIndirectObjectToByteString catalogObject,
           pdfIndirectObjectToByteString pagesObject,
           pdfIndirectObjectToByteString pageObject,
           pdfIndirectObjectToByteString contentObject
         ]
 
-      pdfHeader = C8.pack "%PDF-1.4"
+      pdfFileHeader = C8.pack "%PDF-1.4"
 
-      -- 3. Calcular offsets y construir la tabla xref y el trailer
+      -- 3. Calcular offsets y construir la tabla xref y el pdfFileTrailer
       -- El offset inicial tiene en cuenta la cabecera del PDF y el salto de línea.
-      objectOffsets = scanl (\acc obj -> acc + fromIntegral (B.length obj) + 1) (B.length pdfHeader + 1) pdfObjects
-      xrefObjectCount = length pdfObjects + 1 -- +1 para el objeto 0
-      xrefEntries =
+      objectOffsets = scanl (\acc obj -> acc + (B.length obj) + 1) (B.length pdfFileHeader + 1) pdfFileBody
+      xrefObjectCount = length pdfFileBody + 1 -- +1 para el objeto 0
+      pdfCrossRefTable =
         [ C8.pack "xref",
           C8.pack ("0 " ++ show xrefObjectCount),
           C8.pack "0000000000 65535 f "
@@ -159,8 +166,8 @@ generatePdf (PDFDocument contents) outputPath = do
             [ (PDFName "Root", PDFRefType (PDFIndirectReference 1 0)),
               (PDFName "Size", PDFNumType (PDFInt xrefObjectCount))
             ]
-      trailerOffset = fromIntegral $ last objectOffsets
-      trailer =
+      trailerOffset = last objectOffsets
+      pdfFileTrailer =
         [ B.concat [C8.pack "trailer ", pdfTypeToByteString trailerDict],
           C8.pack "startxref",
           C8.pack (show trailerOffset),
@@ -168,17 +175,10 @@ generatePdf (PDFDocument contents) outputPath = do
         ]
 
       -- 4. Unir todas las partes y escribir en el fichero.
-      pdfContent = C8.unlines ([pdfHeader] ++ pdfObjects ++ xrefEntries ++ trailer)
+      pdfContent = C8.unlines ([pdfFileHeader] ++ pdfFileBody ++ pdfCrossRefTable ++ pdfFileTrailer)
 
   withBinaryFile outputPath WriteMode (`B.hPutStr` pdfContent)
   where
-    -- Construye la definición de un recurso de fuente para el diccionario de recursos del PDF.
-    buildFontResource :: (String, String) -> (PDFName, PDFType)
-    buildFontResource (fontName, fontId) =
-      ( PDFName (drop 1 fontId),
-        PDFDictType (PDFDictionary [(PDFName "Type", PDFNameType (PDFName "Font")), (PDFName "Subtype", PDFNameType (PDFName "Type1")), (PDFName "BaseFont", PDFNameType (PDFName fontName)), (PDFName "Encoding", PDFNameType (PDFName "WinAnsiEncoding"))])
-      )
-
     processContent (commands, fontState) content =
       case content of
         CommandItem (Command name params) ->
