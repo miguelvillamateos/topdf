@@ -1,4 +1,3 @@
-
 import Lib (parseInput, generatePdf)
 import System.Environment (getArgs)
 
