@@ -7,49 +7,126 @@ where
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C8
 import Data.Map (Map, fromList, toList, (!))
-import System.IO 
+import Data.Word (Word8)
+import System.IO
   ( IOMode (ReadMode, WriteMode),
-    withFile,
     hGetContents,
     hSetEncoding,
+    utf8,
     withBinaryFile,
-    utf8
+    withFile,
   )
 import Text.Parsec (ParseError, alphaNum, char, endOfLine, eof, letter, many, many1, noneOf, parse, sepBy, spaces, try, (<|>))
 import Text.ParserCombinators.Parsec (GenParser)
-import Data.Word (Word8)
 
--- | Estado de la fuente para la generación del PDF.
 data FontState = FontState
   { fontFamily :: String,
     fontSize :: Int
   }
   deriving (Eq)
 
--- | Un parámetro es un par clave-valor.
+data PDFBoolean = PDFTrue | PDFFalse
+  deriving (Show, Eq)
+
+pdfBooleanToByteString :: PDFBoolean -> B.ByteString
+pdfBooleanToByteString PDFTrue = C8.pack "true"
+pdfBooleanToByteString PDFFalse = C8.pack "false"
+
+data PDFNumeric = PDFInt Int | PDFFloat Double
+  deriving (Show, Eq)
+
+pdfNumericToByteString :: PDFNumeric -> B.ByteString
+pdfNumericToByteString (PDFInt i) = C8.pack (show i)
+pdfNumericToByteString (PDFFloat f) = C8.pack (show f)
+
+data PDFString = PDFString String
+  deriving (Show, Eq)
+
+pdfStringToByteString :: PDFString -> B.ByteString
+pdfStringToByteString (PDFString str) = B.concat [C8.pack "(", encodeWinAnsi str, C8.pack ")"]
+
+data PDFName = PDFName String
+  deriving (Show, Eq)
+
+pdfNameToByteString :: PDFName -> B.ByteString
+pdfNameToByteString (PDFName name) = C8.pack ('/' : name)
+
+pdfIndirectObjectToByteString :: PDFIndirectObject -> B.ByteString
+pdfIndirectObjectToByteString (PDFIndirectObject objNum genNum pdfType) =
+  B.concat
+    [ C8.pack (show objNum ++ " " ++ show genNum ++ " obj\n"),
+      pdfTypeToByteString pdfType,
+      C8.pack "\nendobj"
+    ]
+
+newtype PDFArray = PDFArray [PDFType]
+  deriving (Show, Eq)
+
+newtype PDFDictionary = PDFDictionary [(PDFName, PDFType)]
+  deriving (Show, Eq)
+
+data PDFStream = PDFStream PDFDictionary B.ByteString
+  deriving (Show, Eq)
+
+data PDFIndirectReference = PDFIndirectReference Int Int
+  deriving (Show, Eq)
+
+data PDFIndirectObject = PDFIndirectObject Int Int PDFType
+  deriving (Show, Eq)
+
+data PDFType
+  = PDFBoolType PDFBoolean
+  | PDFNumType PDFNumeric
+  | PDFStrType PDFString
+  | PDFNameType PDFName
+  | PDFArrType PDFArray
+  | PDFDictType PDFDictionary
+  | PDFStreamType PDFStream
+  | PDFRefType PDFIndirectReference 
+  | PDFIndirectObjectType PDFIndirectObject
+  | PDFNullType 
+  deriving (Show, Eq)
+
+pdfTypeToByteString :: PDFType -> B.ByteString
+pdfTypeToByteString (PDFBoolType b) = pdfBooleanToByteString b
+pdfTypeToByteString (PDFNumType n) = pdfNumericToByteString n
+pdfTypeToByteString (PDFStrType s) = pdfStringToByteString s
+pdfTypeToByteString (PDFNameType n) = pdfNameToByteString n
+pdfTypeToByteString (PDFRefType (PDFIndirectReference objNum genNum)) = C8.pack $ show objNum ++ " " ++ show genNum ++ " R"
+pdfTypeToByteString (PDFArrType (PDFArray arr)) = B.concat [C8.pack "[ ", B.intercalate (C8.pack " ") (map pdfTypeToByteString arr), C8.pack " ]"]
+pdfTypeToByteString (PDFDictType (PDFDictionary pairs)) =
+  let toPairByteString (key, val) = B.concat [pdfNameToByteString key, C8.pack " ", pdfTypeToByteString val]
+      dictContent = B.intercalate (C8.pack " ") (map toPairByteString pairs)
+   in B.concat [C8.pack "<< ", dictContent, C8.pack " >>"]
+pdfTypeToByteString PDFNullType = C8.pack "null"
+pdfTypeToByteString (PDFStreamType (PDFStream (PDFDictionary pairs) streamData)) =
+  let streamLength = B.length streamData
+      lengthEntry = (PDFName "Length", PDFNumType (PDFInt streamLength))
+      updatedPairs = lengthEntry : filter (\(PDFName k, _) -> k /= "Length") pairs
+      dictWithLength = PDFDictType (PDFDictionary updatedPairs)
+   in B.concat [pdfTypeToByteString dictWithLength, C8.pack "\nstream\n", streamData, C8.pack "\nendstream"]
+pdfTypeToByteString (PDFIndirectObjectType (PDFIndirectObject objNum genNum pdfType)) =
+  pdfIndirectObjectToByteString (PDFIndirectObject objNum genNum pdfType)
+
 type Param = (String, String)
 
--- | Un comando tiene un nombre y una lista de parámetros.
 data Command = Command String [Param]
   deriving (Show, Eq)
 
--- | El contenido de un documento puede ser texto o un comando.
-data Content = TextLine String | CommandItem Command
+data Content
+  = TextLine String
+  | CommandItem Command
   deriving (Show, Eq)
 
--- | El documento parseado es una lista de elementos de contenido.
 data PDFValue = PDFDocument [Content]
   deriving (Show, Eq)
 
--- | Parsea un identificador (letras).
 identifier :: GenParser Char st String
 identifier = many1 letter
 
--- | Parsea un valor de parámetro (letras y números).
 paramValue :: GenParser Char st String
 paramValue = many1 alphaNum
 
--- | Parsea un parámetro con el formato "nombre = valor".
 paramParser :: GenParser Char st Param
 paramParser = do
   name <- identifier
@@ -57,7 +134,6 @@ paramParser = do
   value <- paramValue
   return (name, value)
 
--- | Parsea un comando con el formato "\nombre[param1=val1, param2=val2]".
 commandParser :: GenParser Char st Content
 commandParser = try $ do
   _ <- char '\\'
@@ -74,19 +150,31 @@ textLine = TextLine <$> many (noneOf "\n\r")
 -- | El parser principal que lee múltiples líneas y las une.
 textParser :: GenParser Char st PDFValue
 textParser = do
-  -- Lee una lista de contenidos, que pueden ser comandos o texto.
   contents <- (commandParser <|> textLine) `sepBy` endOfLine
-  eof -- Asegura que hemos consumido toda la entrada.
+  eof
   return $ PDFDocument contents
 
 -- | Lee un fichero, lo parsea y devuelve el resultado o un error.
 parseInput :: FilePath -> IO (Either ParseError PDFValue)
 parseInput inputFilePath = withFile inputFilePath ReadMode $ \handle -> do
-  -- Establece explícitamente la codificación a UTF-8 para la lectura del fichero.
   hSetEncoding handle utf8
   contents <- hGetContents handle
-  -- `parse` necesita que la entrada sea evaluada completamente.
   return $! parse textParser inputFilePath contents
+
+-- | Codifica un String a un ByteString usando una correspondencia simple a WinAnsiEncoding.
+-- Escapa los caracteres especiales de literales de cadena de PDF: '(', ')', '\'.
+encodeWinAnsi :: String -> B.ByteString
+encodeWinAnsi = B.pack . concatMap escapeAndEncode
+  where
+    escapeAndEncode c
+      | c == '(' || c == ')' || c == '\\' = [92, fromIntegral (fromEnum c)]
+      | fromEnum c < 256 = [fromIntegral (fromEnum c) :: Word8]
+      | otherwise = [63] -- Reemplaza caracteres no soportados con '?'
+
+-- | Función de ayuda para construir un comando de stream a partir de operandos y un operador.
+buildStreamCommand :: [PDFType] -> String -> B.ByteString
+buildStreamCommand operands operator =
+  B.intercalate (C8.pack " ") (map pdfTypeToByteString operands ++ [C8.pack operator])
 
 -- | Genera un fichero PDF a partir de un PDFValue.
 generatePdf :: PDFValue -> FilePath -> IO ()
@@ -95,89 +183,122 @@ generatePdf (PDFDocument contents) outputPath = do
       initialFontState = FontState {fontFamily = "Helvetica", fontSize = 12}
       initialFoldState = ([], initialFontState)
       (pdfTextCommands, _finalState) = foldl processContent initialFoldState contents
+
+      -- Rellena un número con ceros a la izquierda hasta tener 10 dígitos.
       pad10 n = let s = show n in replicate (10 - length s) '0' ++ s
+
       -- 2. Construir objetos PDF como ByteStrings
-      initialFontCmd = C8.pack $ fontRef (fontFamily initialFontState) ++ " " ++ show (fontSize initialFontState) ++ " Tf"
-      contentStream = B.intercalate (C8.pack "\n") ([C8.pack "BT", initialFontCmd, C8.pack "12 TL", C8.pack "72 800 Td"] ++ pdfTextCommands ++ [C8.pack "ET"])
-      contentLength = B.length contentStream      
-      -- Genera la sección de recursos de fuente a partir del `fontRefMap`.
-      -- Esto evita duplicar los nombres de las fuentes y sus referencias.
-      fontResources = B.intercalate (C8.pack " ") $ map buildFontResource (toList fontRefMap)
+      initialFontCmd = buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily initialFontState))), PDFNumType (PDFInt (fontSize initialFontState))] "Tf"
+      initialLeadingCmd = buildStreamCommand [PDFNumType (PDFInt (fontSize initialFontState))] "TL"
+      initialTextPosCmd = buildStreamCommand [PDFNumType (PDFInt 72), PDFNumType (PDFInt 800)] "Td"
+
+      contentStream = B.intercalate (C8.pack "\n") ([C8.pack "BT", initialFontCmd, initialLeadingCmd, initialTextPosCmd] ++ pdfTextCommands ++ [C8.pack "ET"])
+      fontResourceDict = PDFDictType (PDFDictionary (map buildFontResource (toList fontRefMap)))
+      -- Definición de los objetos PDF usando los tipos de datos.
+      catalogObject =
+        PDFIndirectObject 1 0 $
+          PDFDictType $
+            PDFDictionary
+              [ (PDFName "Type", PDFNameType (PDFName "Catalog")),
+                (PDFName "Pages", PDFRefType (PDFIndirectReference 2 0))
+              ]
+
+      pagesObject =
+        PDFIndirectObject 2 0 $
+          PDFDictType $
+            PDFDictionary
+              [ (PDFName "Type", PDFNameType (PDFName "Pages")),
+                (PDFName "Kids", PDFArrType (PDFArray [PDFRefType (PDFIndirectReference 3 0)])),
+                (PDFName "Count", PDFNumType (PDFInt 1))
+              ]
+
+      pageObject =
+        PDFIndirectObject 3 0 $
+          PDFDictType $
+            PDFDictionary
+              [ (PDFName "Type", PDFNameType (PDFName "Page")),
+                (PDFName "Parent", PDFRefType (PDFIndirectReference 2 0)),
+                (PDFName "MediaBox", PDFArrType (PDFArray [PDFNumType (PDFInt 0), PDFNumType (PDFInt 0), PDFNumType (PDFInt 595), PDFNumType (PDFInt 842)])),
+                (PDFName "Contents", PDFRefType (PDFIndirectReference 4 0)),
+                (PDFName "Resources", PDFDictType (PDFDictionary [(PDFName "Font", fontResourceDict)]))
+              ]
+
+      contentObject = PDFIndirectObject 4 0 $ PDFStreamType (PDFStream (PDFDictionary []) contentStream)
+
+      -- Convierte los objetos a ByteString para el fichero.
       pdfObjects =
-        [ C8.pack "%PDF-1.4",
-          C8.pack "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-          C8.pack "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
-          C8.pack "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << "
-            <> fontResources
-            <> C8.pack " >> >> >> endobj",
-          C8.pack ("4 0 obj << /Length " ++ show contentLength ++ " >> stream"),
-          contentStream,
-          C8.pack "endstream endobj"
+        [ pdfIndirectObjectToByteString catalogObject,
+          pdfIndirectObjectToByteString pagesObject,
+          pdfIndirectObjectToByteString pageObject,
+          pdfIndirectObjectToByteString contentObject
         ]
 
+      pdfHeader = C8.pack "%PDF-1.4"
+
       -- 3. Calcular offsets y construir la tabla xref y el trailer
-      objectOffsets = scanl (\acc obj -> acc + fromIntegral (B.length obj) + 1) 0 pdfObjects
+      -- El offset inicial tiene en cuenta la cabecera del PDF y el salto de línea.
+      objectOffsets = scanl (\acc obj -> acc + fromIntegral (B.length obj) + 1) (B.length pdfHeader + 1) pdfObjects
+      xrefObjectCount = length pdfObjects + 1 -- +1 para el objeto 0
+
       xrefEntries =
         [ C8.pack "xref",
-          C8.pack "0 5",
+          C8.pack ("0 " ++ show xrefObjectCount),
           C8.pack "0000000000 65535 f "
         ]
           ++ map (C8.pack . (++ " 00000 n ") . pad10) (init objectOffsets)
-      trailerOffset = last objectOffsets
+
+      trailerDict = PDFDictType $ PDFDictionary [
+          (PDFName "Root", PDFRefType (PDFIndirectReference 1 0)),
+          (PDFName "Size", PDFNumType (PDFInt xrefObjectCount))
+        ]
+      trailerOffset = fromIntegral $ last objectOffsets
       trailer =
-        [ C8.pack "trailer << /Root 1 0 R /Size 5 >>",
+        [ B.concat [C8.pack "trailer ", pdfTypeToByteString trailerDict],
           C8.pack "startxref",
           C8.pack (show trailerOffset),
           C8.pack "%%EOF"
         ]
 
-      -- 4. Unir todas las partes
-
-      pdfContent = C8.unlines (pdfObjects ++ xrefEntries ++ trailer)
+      -- 4. Unir todas las partes y escribir en el fichero.
+      pdfContent = C8.unlines ([pdfHeader] ++ pdfObjects ++ xrefEntries ++ trailer)
 
   withBinaryFile outputPath WriteMode (`B.hPutStr` pdfContent)
   where
     -- Construye la definición de un recurso de fuente para el diccionario de recursos del PDF.
-    buildFontResource :: (String, String) -> B.ByteString
+    buildFontResource :: (String, String) -> (PDFName, PDFType)
     buildFontResource (fontName, fontId) =
-      C8.pack $
-        fontId ++ " << /Type /Font /Subtype /Type1 /BaseFont /" ++ fontName
-          ++ " /Encoding /WinAnsiEncoding >>"
+      ( PDFName (drop 1 fontId),
+        PDFDictType (PDFDictionary [(PDFName "Type", PDFNameType (PDFName "Font")), (PDFName "Subtype", PDFNameType (PDFName "Type1")), (PDFName "BaseFont", PDFNameType (PDFName fontName)), (PDFName "Encoding", PDFNameType (PDFName "WinAnsiEncoding"))])
+      )
 
-    -- Itera sobre el contenido y genera los comandos PDF apropiados.
-    -- El 'acc' (acumulador) es una tupla de (lista de comandos, tamaño de fuente actual).
     processContent (commands, fontState) content =
-      case content of       
+      case content of
         CommandItem (Command name params) ->
           case name of
             "font" -> handleFontCommand (commands, fontState) params
             _ -> (commands, fontState) -- Ignora comandos no reconocidos
-        TextLine str -> (commands ++ [B.concat [C8.pack "(", encodeWinAnsi str, C8.pack ") Tj T*"]], fontState)
+        TextLine str -> (commands ++ [B.concat [pdfStringToByteString $ PDFString str, C8.pack " Tj T*"]], fontState)
 
-    -- Codifica un String a un ByteString usando una correspondencia simple a WinAnsiEncoding.
-    -- Escapa los caracteres especiales de literales de cadena de PDF: '(', ')', '\'.
-    encodeWinAnsi :: String -> B.ByteString
-    encodeWinAnsi = B.pack . concatMap escapeAndEncode
-      where
-        escapeAndEncode c | c == '(' || c == ')' || c == '\\' = [92, fromIntegral (fromEnum c)] -- Escapa con '\' (ASCII 92)
-                          | fromEnum c < 256 = [fromIntegral (fromEnum c) :: Word8]
-                          | otherwise = [63] -- Reemplaza caracteres no soportados con '?' (ASCII 63)
+    -- Mapa de familias de fuentes a sus identificadores de recursos en el PDF.
     fontRefMap :: Map String String
     fontRefMap = fromList [("Helvetica", "/F1"), ("Courier", "/F2"), ("Times-Roman", "/F3")]
 
-    fontRef family = fontRefMap ! family -- Assumes family exists
+    -- Busca el identificador de una fuente. Falla si la fuente no existe.
+    fontRef family = fontRefMap ! family
+
+    -- Maneja un comando \font, actualizando el estado de la fuente si es necesario.
     handleFontCommand (commands, initialFontState) params =
-      let -- Procesa cada parámetro y actualiza el estado de la fuente.
-          finalFontState = foldl updateFontState initialFontState params
-          -- Genera el comando PDF si el estado de la fuente ha cambiado.
+      let finalFontState = foldl updateFontState initialFontState params
+          -- Genera nuevos comandos de stream solo si el estado de la fuente ha cambiado.
           (newCommands, newFontState)
             | finalFontState /= initialFontState =
-                let newFontCmd = C8.pack $ fontRef (fontFamily finalFontState) ++ " " ++ show (fontSize finalFontState) ++ " Tf"
-                    newLeadingCmd = C8.pack $ show (fontSize finalFontState) ++ " TL"
+                let newFontCmd = buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily finalFontState))), PDFNumType (PDFInt (fontSize finalFontState))] "Tf"
+                    newLeadingCmd = buildStreamCommand [PDFNumType (PDFInt (fontSize finalFontState))] "TL"
                  in (commands ++ [newFontCmd, newLeadingCmd], finalFontState)
             | otherwise = (commands, initialFontState)
        in (newCommands, newFontState)
 
+    -- Actualiza el estado de la fuente basado en un solo parámetro.
     updateFontState state ("family", newFamily)
       | newFamily `elem` ["Helvetica", "Courier", "Times-Roman"] = state {fontFamily = newFamily}
       | otherwise = state -- Ignora familias de fuente no soportadas
@@ -186,5 +307,3 @@ generatePdf (PDFDocument contents) outputPath = do
         [(newSize, "")] -> state {fontSize = newSize}
         _ -> state -- Ignora tamaños no válidos
     updateFontState state _ = state -- Ignora parámetros no reconocidos
-
-generatePdf _ _ = putStrLn "Tipo de PDFValue no soportado para la generación."
