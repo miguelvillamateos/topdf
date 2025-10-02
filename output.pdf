@@ -1,31 +1,42 @@
 %PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F2 << /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >> /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >> >> >> >> endobj
-4 0 obj << /Length 117 >> stream
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [ 3 0 R ] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [ 0 0 595 842 ] /Contents 4 0 R /Resources << /Font << /F2 << /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >> /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >> >> >> >>
+endobj
+4 0 obj
+<< /Length 159 >>
+stream
 BT
-/F1 12 Tf
-12 TL
+//F1 12.0 Tf
+12.0 TL
 72 800 Td
-(A ÁÉÍÓÚ áéíóú ñ Ñ) Tj T*
-/F2 18 Tf
-18 TL
-(A ÁÉÍÓÚ áéíóú ñ Ñ) Tj T*
-() Tj T*
-() Tj T*
+//F2 18.0 Tf
+18.0 TL
+(Esta es la primera línea) Tj T*
+//F2 10.5 Tf
+10.5 TL
+2.5 Tc
+(Esta es la primera línea también) Tj T*
 ET
-endstream endobj
+endstream
+endobj
+5 0 obj
+<< /Type /Encoding /BaseEncoding /WinAnsiEncoding >>
+endobj
 xref
-0 5
+0 6
 0000000000 65535 f 
-0000000000 00000 n 
 0000000009 00000 n 
 0000000058 00000 n 
-0000000115 00000 n 
-0000000489 00000 n 
-0000000522 00000 n 
-0000000640 00000 n 
-trailer << /Root 1 0 R /Size 5 >>
+0000000117 00000 n 
+0000000493 00000 n 
+0000000703 00000 n 
+trailer << /Root 1 0 R /Size 6 >>
 startxref
-657
+771
 %%EOF

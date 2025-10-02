@@ -7,6 +7,20 @@ where
 import qualified Data.ByteString as B
 import Data.Map (Map, fromList, toList, (!))
 import PDF
+  ( PDFArray (..),
+    PDFDictionary (..),
+    PDFIndirectObject (..),
+    PDFIndirectReference (..),
+    PDFName (..),
+    PDFNumeric (..),
+    PDFStream (..),  
+    PDFString (..),
+    PDFType (..),
+    pdfIndirectObjectToByteString,  
+    pdfTypeToByteString,
+    pdfStringToByteString   
+  )
+
 import System.IO
   ( IOMode (ReadMode, WriteMode),
     hGetContents,
@@ -15,15 +29,21 @@ import System.IO
     withBinaryFile,
     withFile,
   )
-import Text.Parsec (ParseError, alphaNum, char, endOfLine, eof, letter, many, many1, noneOf, parse, sepBy, spaces, try, (<|>))
+import Text.Parsec (ParseError, alphaNum, char,option, endOfLine, eof, letter, many, many1, oneOf,noneOf, parse, sepBy, spaces, try, (<|>))
 import qualified Data.ByteString.Char8 as C8
 import Text.ParserCombinators.Parsec (GenParser)
 
 data FontState = FontState
-  { fontFamily :: String,
-    fontSize :: Int
+  { 
+    charSpace :: Float,
+    wordSpace :: Float,
+    scale:: Double,
+    leading :: Int,
+    fontFamily :: String,
+    fontSize :: Float
   }
   deriving (Eq)
+
 
 type Param = (String, String)
 
@@ -42,7 +62,14 @@ identifier :: GenParser Char st String
 identifier = many1 letter
 
 paramValue :: GenParser Char st String
-paramValue = many1 alphaNum
+paramValue = try floatStr <|> many1 alphaNum
+  where
+    floatStr = do
+      integerPart <- many1 (oneOf "0123456789")
+      decimalPart <- option "" $ do
+        _ <- char '.'
+        many1 (oneOf "0123456789")
+      return (integerPart ++ if null decimalPart then "" else "." ++ decimalPart)
 
 paramParser :: GenParser Char st Param
 paramParser = do
@@ -94,7 +121,7 @@ buildFontResource (fontName, fontId) =
 generatePdf :: PDFValue -> FilePath -> IO ()
 generatePdf (PDFDocument contents) outputPath = do
   let -- 1. Procesar contenido y definir helpers
-      initialFontState = FontState {fontFamily = "Helvetica", fontSize = 12}
+      initialFontState = FontState {charSpace = 0, wordSpace = 0, scale = 4, leading = 0,fontFamily = "Helvetica", fontSize = 12}
       initialFoldState = ([], initialFontState)
       (pdfTextCommands, _finalState) = foldl processContent initialFoldState contents
 
@@ -102,8 +129,8 @@ generatePdf (PDFDocument contents) outputPath = do
       pad10 n = let s = show n in replicate (10 - length s) '0' ++ s
 
       -- 2. Construir objetos PDF como ByteStrings
-      initialFontCmd = buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily initialFontState))), PDFNumType (PDFInt (fontSize initialFontState))] "Tf"
-      initialLeadingCmd = buildStreamCommand [PDFNumType (PDFInt (fontSize initialFontState))] "TL"
+      initialFontCmd = buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily initialFontState))), PDFNumType (PDFFloat (fontSize initialFontState))] "Tf"
+      initialLeadingCmd = buildStreamCommand [PDFNumType (PDFFloat (fontSize initialFontState))] "TL"
       initialTextPosCmd = buildStreamCommand [PDFNumType (PDFInt 72), PDFNumType (PDFInt 800)] "Td"
 
       contentStream = B.intercalate (C8.pack "\n") ([C8.pack "BT", initialFontCmd, initialLeadingCmd, initialTextPosCmd] ++ pdfTextCommands ++ [C8.pack "ET"])
@@ -139,12 +166,21 @@ generatePdf (PDFDocument contents) outputPath = do
 
       contentObject = PDFIndirectObject 4 0 $ PDFStreamType (PDFStream (PDFDictionary []) contentStream)
 
+      encodingObject =
+        PDFIndirectObject 5 0 $
+          PDFDictType $
+            PDFDictionary
+              [ (PDFName "Type", PDFNameType (PDFName "Encoding")),
+                (PDFName "BaseEncoding", PDFNameType (PDFName "WinAnsiEncoding"))
+              ]
+
       -- Convierte los objetos a ByteString para el fichero.
       pdfFileBody =
         [ pdfIndirectObjectToByteString catalogObject,
           pdfIndirectObjectToByteString pagesObject,
           pdfIndirectObjectToByteString pageObject,
-          pdfIndirectObjectToByteString contentObject
+          pdfIndirectObjectToByteString contentObject,
+          pdfIndirectObjectToByteString encodingObject
         ]
 
       pdfFileHeader = C8.pack "%PDF-1.4"
@@ -167,15 +203,18 @@ generatePdf (PDFDocument contents) outputPath = do
               (PDFName "Size", PDFNumType (PDFInt xrefObjectCount))
             ]
       trailerOffset = last objectOffsets
-      pdfFileTrailer =
-        [ B.concat [C8.pack "trailer ", pdfTypeToByteString trailerDict],
-          C8.pack "startxref",
-          C8.pack (show trailerOffset),
-          C8.pack "%%EOF"
-        ]
 
       -- 4. Unir todas las partes y escribir en el fichero.
-      pdfContent = C8.unlines ([pdfFileHeader] ++ pdfFileBody ++ pdfCrossRefTable ++ pdfFileTrailer)
+      pdfContent =
+        C8.unlines $
+          [pdfFileHeader]
+            ++ pdfFileBody
+            ++ pdfCrossRefTable
+            ++ [ C8.pack "trailer " <> pdfTypeToByteString trailerDict,
+                 C8.pack "startxref",
+                 C8.pack (show trailerOffset),
+                 C8.pack "%%EOF"
+               ]
 
   withBinaryFile outputPath WriteMode (`B.hPutStr` pdfContent)
   where
@@ -198,13 +237,18 @@ generatePdf (PDFDocument contents) outputPath = do
     handleFontCommand (commands, initialFontState) params =
       let finalFontState = foldl updateFontState initialFontState params
           -- Genera nuevos comandos de stream solo si el estado de la fuente ha cambiado.
-          (newCommands, newFontState)
-            | finalFontState /= initialFontState =
-                let newFontCmd = buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily finalFontState))), PDFNumType (PDFInt (fontSize finalFontState))] "Tf"
-                    newLeadingCmd = buildStreamCommand [PDFNumType (PDFInt (fontSize finalFontState))] "TL"
-                 in (commands ++ [newFontCmd, newLeadingCmd], finalFontState)
-            | otherwise = (commands, initialFontState)
-       in (newCommands, newFontState)
+          generateCommands acc (key, changed) =
+            if changed
+              then case key of
+                "font" -> buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily finalFontState))), PDFNumType (PDFFloat (fontSize finalFontState))] "Tf" : acc
+                "leading" -> buildStreamCommand [PDFNumType (PDFFloat (fontSize finalFontState))] "TL" : acc
+                "charSpace" -> buildStreamCommand [PDFNumType (PDFFloat (charSpace finalFontState))] "Tc" : acc
+                "wordSpace" -> buildStreamCommand [PDFNumType (PDFFloat (wordSpace finalFontState))] "Tw" : acc
+                _ -> acc
+              else acc
+          changedStates = [("font", fontFamily initialFontState /= fontFamily finalFontState || fontSize initialFontState /= fontSize finalFontState), ("leading", fontSize initialFontState /= fontSize finalFontState), ("charSpace", charSpace initialFontState /= charSpace finalFontState)]
+          newCmds = foldl generateCommands [] changedStates
+       in (commands ++ reverse newCmds, finalFontState)
 
     -- Actualiza el estado de la fuente basado en un solo parámetro.
     updateFontState state ("family", newFamily)
@@ -213,5 +257,13 @@ generatePdf (PDFDocument contents) outputPath = do
     updateFontState state ("size", sizeStr) =
       case reads sizeStr of
         [(newSize, "")] -> state {fontSize = newSize}
+        _ -> state -- Ignora tamaños no válidos
+    updateFontState state ("charSpace", cSp) =
+      case reads cSp of
+        [(newCSp, "")] -> state {charSpace = newCSp :: Float}
+        _ -> state -- Ignora tamaños no válidos
+    updateFontState state ("wordSpace", wSp) =
+      case reads wSp of
+        [(newWSp, "")] -> state {wordSpace = newWSp :: Float}
         _ -> state -- Ignora tamaños no válidos
     updateFontState state _ = state -- Ignora parámetros no reconocidos

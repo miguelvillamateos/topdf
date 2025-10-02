@@ -1,4 +1,15 @@
-module PDF
+module PDF ( PDFArray (..),
+    PDFDictionary (..),
+    PDFIndirectObject (..),
+    PDFIndirectReference (..),
+    PDFName (..),
+    PDFNumeric (..),
+    PDFStream (..),  
+    PDFString (..),
+    PDFType (..),
+    pdfIndirectObjectToByteString,  
+    pdfTypeToByteString,
+    pdfStringToByteString )
 where 
 
 import Data.Word (Word8)
@@ -22,7 +33,7 @@ pdfBooleanToByteString :: PDFBoolean -> B.ByteString
 pdfBooleanToByteString PDFTrue = C8.pack "true"
 pdfBooleanToByteString PDFFalse = C8.pack "false"
 
-data PDFNumeric = PDFInt Int | PDFFloat Double
+data PDFNumeric = PDFInt Int | PDFFloat Float
   deriving (Show, Eq)
 
 pdfNumericToByteString :: PDFNumeric -> B.ByteString

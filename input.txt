@@ -1,4 +1,4 @@
-A ÁÉÍÓÚ áéíóú ñ Ñ
-\font[family=Courier, size=18]
-A ÁÉÍÓÚ áéíóú ñ Ñ
-
+\font[family=Courier,size=18.0]
+Esta es la primera línea
+\font[wordSpace=1.5,charSpace=2.5,family=Courier,size=10.5]
+Esta es la primera línea también
