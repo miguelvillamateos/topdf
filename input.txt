@@ -1,4 +1,4 @@
-\font[family=Courier,size=18.0]
+\font[family=Courier,leading=0,size=12]
 Esta es la primera línea
-\font[wordSpace=1.5,charSpace=2.5,family=Courier,size=10.5]
+\font[family=Courier,size=24,leading=48]
 Esta es la primera línea también

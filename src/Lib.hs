@@ -5,6 +5,7 @@ module Lib
 where
 
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as C8
 import Data.Map (Map, fromList, toList, (!))
 import PDF
   ( PDFArray (..),
@@ -13,14 +14,13 @@ import PDF
     PDFIndirectReference (..),
     PDFName (..),
     PDFNumeric (..),
-    PDFStream (..),  
+    PDFStream (..),
     PDFString (..),
     PDFType (..),
-    pdfIndirectObjectToByteString,  
+    pdfIndirectObjectToByteString,
+    pdfStringToByteString,
     pdfTypeToByteString,
-    pdfStringToByteString   
   )
-
 import System.IO
   ( IOMode (ReadMode, WriteMode),
     hGetContents,
@@ -29,21 +29,36 @@ import System.IO
     withBinaryFile,
     withFile,
   )
-import Text.Parsec (ParseError, alphaNum, char,option, endOfLine, eof, letter, many, many1, oneOf,noneOf, parse, sepBy, spaces, try, (<|>))
-import qualified Data.ByteString.Char8 as C8
+import Text.Parsec
+  ( ParseError,
+    alphaNum,
+    char,
+    endOfLine,
+    eof,
+    letter,
+    many,
+    many1,
+    noneOf,
+    oneOf,
+    option,
+    parse,
+    sepBy,
+    spaces,
+    string,
+    try,
+    (<|>),
+  )
 import Text.ParserCombinators.Parsec (GenParser)
 
 data FontState = FontState
-  { 
-    charSpace :: Float,
+  { charSpace :: Float,
     wordSpace :: Float,
-    scale:: Double,
-    leading :: Int,
+    scale :: Double,
+    leading :: Float,
     fontFamily :: String,
     fontSize :: Float
   }
   deriving (Eq)
-
 
 type Param = (String, String)
 
@@ -62,14 +77,21 @@ identifier :: GenParser Char st String
 identifier = many1 letter
 
 paramValue :: GenParser Char st String
-paramValue = try floatStr <|> many1 alphaNum
+paramValue = try floatStr <|> try quotedString <|> many1 (alphaNum <|> oneOf "-_")
   where
     floatStr = do
+      sign <- option "" (string "-")
+      _ <- spaces
       integerPart <- many1 (oneOf "0123456789")
       decimalPart <- option "" $ do
         _ <- char '.'
         many1 (oneOf "0123456789")
-      return (integerPart ++ if null decimalPart then "" else "." ++ decimalPart)
+      return (sign ++ integerPart ++ if null decimalPart then "" else "." ++ decimalPart)
+
+    quotedString = singleQuoted <|> doubleQuoted
+      where
+        singleQuoted = char '\'' *> many (noneOf "'") <* char '\''
+        doubleQuoted = char '"' *> many (noneOf "\"") <* char '"'
 
 paramParser :: GenParser Char st Param
 paramParser = do
@@ -121,7 +143,7 @@ buildFontResource (fontName, fontId) =
 generatePdf :: PDFValue -> FilePath -> IO ()
 generatePdf (PDFDocument contents) outputPath = do
   let -- 1. Procesar contenido y definir helpers
-      initialFontState = FontState {charSpace = 0, wordSpace = 0, scale = 4, leading = 0,fontFamily = "Helvetica", fontSize = 12}
+      initialFontState = FontState {charSpace = 0, wordSpace = 0, scale = 4, leading = 0, fontFamily = "Helvetica", fontSize = 12}
       initialFoldState = ([], initialFontState)
       (pdfTextCommands, _finalState) = foldl processContent initialFoldState contents
 
@@ -241,7 +263,7 @@ generatePdf (PDFDocument contents) outputPath = do
             if changed
               then case key of
                 "font" -> buildStreamCommand [PDFNameType (PDFName (fontRef (fontFamily finalFontState))), PDFNumType (PDFFloat (fontSize finalFontState))] "Tf" : acc
-                "leading" -> buildStreamCommand [PDFNumType (PDFFloat (fontSize finalFontState))] "TL" : acc
+                "leading" -> buildStreamCommand [PDFNumType (PDFFloat (leading finalFontState))] "TL" : acc
                 "charSpace" -> buildStreamCommand [PDFNumType (PDFFloat (charSpace finalFontState))] "Tc" : acc
                 "wordSpace" -> buildStreamCommand [PDFNumType (PDFFloat (wordSpace finalFontState))] "Tw" : acc
                 _ -> acc
@@ -265,5 +287,9 @@ generatePdf (PDFDocument contents) outputPath = do
     updateFontState state ("wordSpace", wSp) =
       case reads wSp of
         [(newWSp, "")] -> state {wordSpace = newWSp :: Float}
+        _ -> state -- Ignora tamaños no válidos
+    updateFontState state ("leading", lead) =
+      case reads lead of
+        [(newLead, "")] -> state {leading = newLead}
         _ -> state -- Ignora tamaños no válidos
     updateFontState state _ = state -- Ignora parámetros no reconocidos
